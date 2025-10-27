@@ -22,6 +22,7 @@
     "@assistant-ui/react": "^0.11.28",
     "@assistant-ui/react-ai-sdk": "^1.1.5",
     "@assistant-ui/react-markdown": "^0.11.1",
+    "@mastra/ai-sdk": "^0.2.4",
     "@mastra/core": "^0.23.1",
     "@mastra/libsql": "^0.16.1",
     "@mastra/memory": "^0.15.9",
