@@ -22,34 +22,29 @@ interface WeatherResponse {
 
 export const weatherTool = createTool({
   id: 'get-weather',
-  description: 'Get current weather for a location',
+  description: '緯度・経度から現在の天気を取得する',
   inputSchema: z.object({
-    location: z.string().describe('City name'),
+    latitude: z.number().describe('緯度'),
+    longitude: z.number().describe('経度'),
+    address: z.string().describe('住所テキスト（表示用）'),
   }),
   outputSchema: z.object({
-    temperature: z.number(),
-    feelsLike: z.number(),
-    humidity: z.number(),
-    windSpeed: z.number(),
-    windGust: z.number(),
-    conditions: z.string(),
-    location: z.string(),
+    temperature: z.number().describe('現在の気温'),
+    feelsLike: z.number().describe('体感温度'),
+    humidity: z.number().describe('相対湿度'),
+    windSpeed: z.number().describe('風速'),
+    windGust: z.number().describe('突風の速度'),
+    conditions: z.string().describe('現在の天気状況'),
+    address: z.string().describe('住所テキスト'),
+    latitude: z.number().describe('緯度'),
+    longitude: z.number().describe('経度'),
   }),
   execute: async ({ context }) => {
-    return await getWeather(context.location);
+    return await getWeather(context.latitude, context.longitude, context.address);
   },
 });
 
-const getWeather = async (location: string) => {
-  const geocodingUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(location)}&count=1`;
-  const geocodingResponse = await fetch(geocodingUrl);
-  const geocodingData = (await geocodingResponse.json()) as GeocodingResponse;
-
-  if (!geocodingData.results?.[0]) {
-    throw new Error(`Location '${location}' not found`);
-  }
-
-  const { latitude, longitude, name } = geocodingData.results[0];
+const getWeather = async (latitude: number, longitude: number, address: string) => {
 
   const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,wind_gusts_10m,weather_code`;
 
@@ -63,7 +58,9 @@ const getWeather = async (location: string) => {
     windSpeed: data.current.wind_speed_10m,
     windGust: data.current.wind_gusts_10m,
     conditions: getWeatherCondition(data.current.weather_code),
-    location: name,
+    address,
+    latitude,
+    longitude,
   };
 };
 

@@ -34,14 +34,14 @@ function getWeatherCondition(code: number): string {
 
 const fetchWeather = createStep({
   id: 'fetch-weather',
-  description: 'Fetches weather forecast for a given city',
+  description: '指定された都市の天気予報を取得します',
   inputSchema: z.object({
-    city: z.string().describe('The city to get the weather for'),
+    city: z.string().describe('天気予報を取得する都市'),
   }),
   outputSchema: forecastSchema,
   execute: async ({ inputData }) => {
     if (!inputData) {
-      throw new Error('Input data not found');
+      throw new Error('入力データが見つかりません');
     }
 
     const geocodingUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(inputData.city)}&count=1`;
@@ -51,7 +51,7 @@ const fetchWeather = createStep({
     };
 
     if (!geocodingData.results?.[0]) {
-      throw new Error(`Location '${inputData.city}' not found`);
+      throw new Error(`場所 '${inputData.city}' が見つかりません`);
     }
 
     const { latitude, longitude, name } = geocodingData.results[0];
@@ -88,64 +88,64 @@ const fetchWeather = createStep({
 
 const planActivities = createStep({
   id: 'plan-activities',
-  description: 'Suggests activities based on weather conditions',
+  description: '天気予報に基づいてアクティビティを提案します',
   inputSchema: forecastSchema,
   outputSchema: z.object({
-    activities: z.string(),
+    activities: z.string().describe('提案されたアクティビティのテキスト'),
   }),
   execute: async ({ inputData, mastra }) => {
     const forecast = inputData;
 
     if (!forecast) {
-      throw new Error('Forecast data not found');
+      throw new Error('予報データが見つかりません');
     }
 
     const agent = mastra?.getAgent('weatherAgent');
     if (!agent) {
-      throw new Error('Weather agent not found');
+      throw new Error('天気エージェントが見つかりません');
     }
 
-    const prompt = `Based on the following weather forecast for ${forecast.location}, suggest appropriate activities:
+    const prompt = `以下の${forecast.location}の天気予報に基づいて、適切なアクティビティを提案してください。
       ${JSON.stringify(forecast, null, 2)}
-      For each day in the forecast, structure your response exactly as follows:
+      予報の各日について、以下の形式で正確に回答を構成してください。
 
-      📅 [Day, Month Date, Year]
+      📅 [曜日、月 日、年]
       ═══════════════════════════
 
-      🌡️ WEATHER SUMMARY
-      • Conditions: [brief description]
-      • Temperature: [X°C/Y°F to A°C/B°F]
-      • Precipitation: [X% chance]
+      🌡️ 天気概要
+      • 状況: [簡単な説明]
+      • 気温: [X°C/Y°F から A°C/B°F]
+      • 降水量: [X% の確率]
 
-      🌅 MORNING ACTIVITIES
-      Outdoor:
-      • [Activity Name] - [Brief description including specific location/route]
-        Best timing: [specific time range]
-        Note: [relevant weather consideration]
+      🌅 午前中のアクティビティ
+      屋外:
+      • [アクティビティ名] - [具体的な場所/ルートを含む簡単な説明]
+        最適な時間帯: [特定の時間帯]
+        備考: [関連する天候の考慮事項]
 
-      🌞 AFTERNOON ACTIVITIES
-      Outdoor:
-      • [Activity Name] - [Brief description including specific location/route]
-        Best timing: [specific time range]
-        Note: [relevant weather consideration]
+      🌞 午後のアクティビティ
+      屋外:
+      • [アクティビティ名] - [具体的な場所/ルートを含む簡単な説明]
+        最適な時間帯: [特定の時間帯]
+        備考: [関連する天候の考慮事項]
 
-      🏠 INDOOR ALTERNATIVES
-      • [Activity Name] - [Brief description including specific venue]
-        Ideal for: [weather condition that would trigger this alternative]
+      🏠 屋内での代替案
+      • [アクティビティ名] - [具体的な場所を含む簡単な説明]
+        理想的な状況: [この代替案がトリガーされる天候条件]
 
-      ⚠️ SPECIAL CONSIDERATIONS
-      • [Any relevant weather warnings, UV index, wind conditions, etc.]
+      ⚠️ 特記事項
+      • [関連する気象警報、UV指数、風の状態など]
 
-      Guidelines:
-      - Suggest 2-3 time-specific outdoor activities per day
-      - Include 1-2 indoor backup options
-      - For precipitation >50%, lead with indoor activities
-      - All activities must be specific to the location
-      - Include specific venues, trails, or locations
-      - Consider activity intensity based on temperature
-      - Keep descriptions concise but informative
+      ガイドライン:
+      - 1日あたり2〜3つの時間指定の屋外アクティビティを提案してください。
+      - 1〜2つの屋内バックアップオプションを含めてください。
+      - 降水量が50%を超える場合は、屋内アクティビティを優先してください。
+      - すべてのアクティビティは、その場所に固有のものでなければなりません。
+      - 具体的な会場、トレイル、または場所を含めてください。
+      - 気温に基づいてアクティビティの強度を考慮してください。
+      - 説明は簡潔かつ有益にしてください。
 
-      Maintain this exact formatting for consistency, using the emoji and section headers as shown.`;
+      一貫性を保つため、絵文字とセクションヘッダーを上記のとおり正確に維持してください。`;
 
     const response = await agent.stream([
       {
@@ -170,10 +170,10 @@ const planActivities = createStep({
 const weatherWorkflow = createWorkflow({
   id: 'weather-workflow',
   inputSchema: z.object({
-    city: z.string().describe('The city to get the weather for'),
+    city: z.string().describe('天気予報を取得する都市'),
   }),
   outputSchema: z.object({
-    activities: z.string(),
+    activities: z.string().describe('提案されたアクティビティのテキスト'),
   }),
 })
   .then(fetchWeather)
