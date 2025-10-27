@@ -24,6 +24,7 @@
     "@assistant-ui/react-markdown": "^0.11.1",
     "@mastra/ai-sdk": "^0.2.4",
     "@mastra/core": "^0.23.1",
+    "@mastra/deployer-vercel": "^0.12.14",
     "@mastra/libsql": "^0.16.1",
     "@mastra/memory": "^0.15.9",
     "@radix-ui/react-avatar": "^1.1.10",
