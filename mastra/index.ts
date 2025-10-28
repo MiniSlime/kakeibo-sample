@@ -1,16 +1,16 @@
 
 import { Mastra } from '@mastra/core/mastra';
 import { PinoLogger } from '@mastra/loggers';
-import { weatherWorkflow } from './workflows/weather-workflow';
-import { weatherAgent } from './agents/weather-agent';
+import { kakeiboWorkflow } from './workflows/kakeibo-workflow';
+import { kakeiboAgent } from './agents/kakeibo-agent';
 
 
 export const mastra = new Mastra({
-  workflows: { weatherWorkflow },
-  agents: { weatherAgent },
+  workflows: { kakeiboWorkflow },
+  agents: { kakeiboAgent },
   logger: new PinoLogger({
     name: 'Mastra',
-    level: 'info',
+    level: 'debug', // infoからdebugに変更してより詳細なログを出力
   }),
   telemetry: {
     // Telemetry is deprecated and will be removed in the Nov 4th release
