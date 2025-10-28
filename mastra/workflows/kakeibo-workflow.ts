@@ -1,23 +1,6 @@
 import { createStep, createWorkflow } from '@mastra/core/workflows';
 import { z } from 'zod';
-import fs from 'fs';
-import path from 'path';
-
-// 画像URLをbase64エンコードされたData URLに変換
-async function imageUrlToBase64(imageUrl: string): Promise<string> {
-  // すでにdata URLの場合はそのまま返す
-  if (imageUrl.startsWith('data:')) {
-    return imageUrl;
-  }
-
-  // HTTPSのURLの場合は拒否
-  if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
-    throw new Error('外部URLからの画像取得はサーバー環境制約によりサポートしていません。画像はチャットにファイルとしてアップロードしてください（data:image/... 形式）。');
-  }
-
-  // その他の場合はそのまま返す
-  return imageUrl;
-}
+import { setImageUrlForRun } from '../tools/receipt-ocr-tool';
 
 // レシート情報のスキーマ
 const receiptSchema = z.object({
@@ -38,119 +21,81 @@ const receiptSchema = z.object({
   category: z.string().optional().describe('カテゴリー'),
 });
 
-// ステップ1: レシート画像からOCRで情報を抽出
-const extractReceiptInfo = createStep({
-  id: 'extract-receipt-info',
-  description: 'レシート画像から購入情報を抽出します',
+// ステップ1: レシートOCRエージェントを実行
+const runReceiptOcrAgent = createStep({
+  id: 'run-receipt-ocr-agent',
+  description: 'レシートOCRエージェントを実行してレシート画像から情報を抽出します',
   inputSchema: z.object({
-    imageUrl: z.string().describe('レシート画像のURL（base64 data URLまたはHTTPS URLを指定）'),
+    imageUrl: z.string().describe('レシート画像のURL'),
     category: z.string().optional().describe('支出カテゴリー（食費、日用品など）'),
   }),
   outputSchema: receiptSchema,
-  execute: async ({ inputData }) => {
+  execute: async ({ mastra, inputData, runId }) => {
     if (!inputData) {
       throw new Error('入力データが見つかりません');
     }
 
-    const openaiApiKey = process.env.OPENAI_API_KEY;
-    if (!openaiApiKey) {
-      throw new Error('OPENAI_API_KEY environment variable is not set');
+    const imageUrlPreview = inputData.imageUrl
+      ? (inputData.imageUrl.startsWith('data:') ? `data URL (${inputData.imageUrl.length} chars)` : inputData.imageUrl)
+      : 'null';
+
+    console.log('[DEBUG] Step 1 - Receipt OCR Agent');
+    console.log('[DEBUG] Input imageUrl:', imageUrlPreview);
+    console.log('[DEBUG] Input category:', inputData.category);
+    console.log('[DEBUG] RunID:', runId);
+
+    // 画像URLをグローバルストレージに保存
+    if (runId) {
+      setImageUrlForRun(runId, inputData.imageUrl);
     }
 
-    const base64ImageUrl = await imageUrlToBase64(inputData.imageUrl);
-
-    const prompt = `
-このレシート画像から以下の情報を抽出してJSON形式で返してください。
-簡潔に、必要最小限の情報のみを返してください。
-
-必須項目:
-- storeName: 店舗名
-- date: 購入日時 (YYYY-MM-DDTHH:mm:ss形式、時刻不明なら12:00:00)
-- items: [{name: 商品名, quantity: 数量, price: 単価, total: 小計}]
-- subtotal: 小計
-- tax: 消費税
-- total: 合計金額
-
-任意項目:
-- paymentMethod: 支払い方法（判読できる場合のみ）
-
-レスポンス例:
-{"storeName":"コンビニ","date":"2025-10-28T12:00:00","items":[{"name":"商品A","quantity":1,"price":100,"total":100}],"subtotal":100,"tax":10,"total":110}
-
-不明な項目は省略または0にしてください。
-`;
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000);
-
-    try {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${openaiApiKey}`,
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o',
-          messages: [
-            {
-              role: 'user',
-              content: [
-                {
-                  type: 'text',
-                  text: prompt
-                },
-                {
-                  type: 'image_url',
-                  image_url: {
-                    url: base64ImageUrl,
-                    detail: 'low'
-                  }
-                },
-              ],
-            },
-          ],
-          max_tokens: 800,
-          response_format: { type: 'json_object' },
-        }),
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(`OpenAI API error: ${JSON.stringify(errorData)}`);
+    const agent = mastra.getAgent('receiptOcrAgent');
+    
+    // エージェント実行時にrunIdを渡す
+    const result = await agent.generate(
+      '[システム: ユーザーがレシート画像をアップロードしました。receipt-ocrツールを使用してください]',
+      {
+        runId: runId,
       }
+    );
 
-      const data = await response.json();
-      const content = data.choices[0].message.content;
-      const receiptData = JSON.parse(content);
+    console.log('[DEBUG] Agent text:', result.text);
 
-      return {
-        storeName: receiptData.storeName || '不明',
-        date: receiptData.date || new Date().toISOString(),
-        items: receiptData.items || [],
-        subtotal: receiptData.subtotal || 0,
-        tax: receiptData.tax || 0,
-        total: receiptData.total || 0,
-        paymentMethod: receiptData.paymentMethod,
-        category: inputData.category,
-      };
-    } catch (fetchError) {
-      clearTimeout(timeoutId);
-      if (fetchError instanceof Error && fetchError.name === 'AbortError') {
-        throw new Error('OpenAI APIリクエストがタイムアウトしました（60秒）。画像が大きすぎる可能性があります。');
-      }
-      throw fetchError;
+    // ツール実行結果から情報を抽出
+    const toolResults = result.toolResults || [];
+    console.log('[DEBUG] Tool results count:', toolResults.length);
+    
+    if (toolResults.length === 0) {
+      throw new Error('レシートOCRツールが実行されませんでした');
     }
+
+    const ocrResult = toolResults[0].payload.result as Record<string, unknown>;
+    console.log('[DEBUG] OCR Result - Store:', ocrResult.storeName);
+    console.log('[DEBUG] OCR Result - Items count:', (ocrResult.items as Array<unknown>)?.length || 0);
+    console.log('[DEBUG] OCR Result - Total:', ocrResult.total);
+
+    return {
+      storeName: (ocrResult.storeName as string) || '不明',
+      date: (ocrResult.date as string) || new Date().toISOString(),
+      items: (ocrResult.items as Array<{
+        name: string;
+        quantity: number;
+        price: number;
+        total: number;
+      }>) || [],
+      subtotal: (ocrResult.subtotal as number) || 0,
+      tax: (ocrResult.tax as number) || 0,
+      total: (ocrResult.total as number) || 0,
+      paymentMethod: ocrResult.paymentMethod as string | undefined,
+      category: inputData.category,
+    };
   },
 });
 
-// ステップ2: 抽出した情報をスプレッドシートに記録
-const recordToSpreadsheet = createStep({
-  id: 'record-to-spreadsheet',
-  description: 'レシート情報をスプレッドシートに記録します',
+// ステップ2: CSV記入エージェントを実行
+const runCsvWriterAgent = createStep({
+  id: 'run-csv-writer-agent',
+  description: 'CSV記入エージェントを実行してレシート情報を記録します',
   inputSchema: receiptSchema,
   outputSchema: z.object({
     success: z.boolean().describe('記録が成功したかどうか'),
@@ -158,68 +103,56 @@ const recordToSpreadsheet = createStep({
     filePath: z.string().describe('記録されたファイルのパス'),
     recordedCount: z.number().describe('記録された行数'),
   }),
-  execute: async ({ inputData }) => {
+  execute: async ({ mastra, inputData }) => {
     if (!inputData) {
       throw new Error('レシートデータが見つかりません');
     }
 
-    try {
-      const dataDir = path.join(process.cwd(), 'data');
-      const csvFilePath = path.join(dataDir, 'kakeibo.csv');
+    console.log('[DEBUG] Step 2 - CSV Writer Agent');
+    console.log('[DEBUG] Input - Store:', inputData.storeName);
+    console.log('[DEBUG] Input - Items count:', inputData.items.length);
+    console.log('[DEBUG] Input - Total:', inputData.total);
 
-      if (!fs.existsSync(dataDir)) {
-        fs.mkdirSync(dataDir, { recursive: true });
-      }
+    const agent = mastra.getAgent('csvWriterAgent');
 
-      const csvHeader = '日付,店舗名,カテゴリー,商品名,数量,単価,小計,消費税,合計金額,支払い方法\n';
+    const message = `以下のレシート情報をCSVに記録してください:
+店舗名: ${inputData.storeName}
+日付: ${inputData.date}
+カテゴリー: ${inputData.category || '未分類'}
+商品数: ${inputData.items.length}件
+合計金額: ${inputData.total}円
+支払い方法: ${inputData.paymentMethod || '不明'}
 
-      if (!fs.existsSync(csvFilePath)) {
-        fs.writeFileSync(csvFilePath, csvHeader, 'utf-8');
-      }
+商品リスト:
+${inputData.items.map((item, i) => `${i + 1}. ${item.name} - ${item.quantity}個 × ${item.price}円 = ${item.total}円`).join('\n')}
 
-      let recordedCount = 0;
-      const category = inputData.category || '未分類';
-      const paymentMethod = inputData.paymentMethod || '不明';
+消費税: ${inputData.tax}円
+小計: ${inputData.subtotal}円`;
 
-      const escapeCSV = (value: string): string => {
-        if (value.includes(',') || value.includes('"') || value.includes('\n')) {
-          return `"${value.replace(/"/g, '""')}"`;
-        }
-        return value;
-      };
+    console.log('[DEBUG] Message length:', message.length);
 
-      for (const item of inputData.items) {
-        const row = [
-          inputData.date,
-          escapeCSV(inputData.storeName),
-          escapeCSV(category),
-          escapeCSV(item.name),
-          item.quantity,
-          item.price,
-          item.total,
-          inputData.tax,
-          inputData.total,
-          escapeCSV(paymentMethod),
-        ].join(',') + '\n';
+    const result = await agent.generate(message);
 
-        fs.appendFileSync(csvFilePath, row, 'utf-8');
-        recordedCount++;
-      }
+    console.log('[DEBUG] Agent text:', result.text);
 
-      return {
-        success: true,
-        message: `${recordedCount}件の商品情報を記録しました`,
-        filePath: csvFilePath,
-        recordedCount,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        message: `記録に失敗しました: ${error instanceof Error ? error.message : String(error)}`,
-        filePath: '',
-        recordedCount: 0,
-      };
+    const toolResults = result.toolResults || [];
+    console.log('[DEBUG] Tool results count:', toolResults.length);
+    
+    if (toolResults.length === 0) {
+      throw new Error('CSVツールが実行されませんでした');
     }
+
+    const csvResult = toolResults[0].payload.result as Record<string, unknown>;
+    console.log('[DEBUG] CSV Result - Success:', csvResult.success);
+    console.log('[DEBUG] CSV Result - Message:', csvResult.message);
+    console.log('[DEBUG] CSV Result - RecordedCount:', csvResult.recordedCount);
+
+    return {
+      success: (csvResult.success as boolean) || false,
+      message: (csvResult.message as string) || 'CSV記録完了',
+      filePath: (csvResult.filePath as string) || '',
+      recordedCount: (csvResult.recordedCount as number) || 0,
+    };
   },
 });
 
@@ -237,8 +170,8 @@ const kakeiboWorkflow = createWorkflow({
     recordedCount: z.number().describe('記録された行数'),
   }),
 })
-  .then(extractReceiptInfo)
-  .then(recordToSpreadsheet);
+  .then(runReceiptOcrAgent)
+  .then(runCsvWriterAgent);
 
 kakeiboWorkflow.commit();
 
