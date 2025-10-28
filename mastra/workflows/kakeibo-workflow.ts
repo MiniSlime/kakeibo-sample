@@ -52,18 +52,12 @@ const extractReceiptInfo = createStep({
       throw new Error('入力データが見つかりません');
     }
 
-    console.log('[kakeibo-workflow] ========== START EXTRACT ==========');
-    console.log('[kakeibo-workflow] Image URL length:', inputData.imageUrl.length);
-
     const openaiApiKey = process.env.OPENAI_API_KEY;
     if (!openaiApiKey) {
       throw new Error('OPENAI_API_KEY environment variable is not set');
     }
 
-    console.log('[kakeibo-workflow] Step 1: Converting image URL');
-    // 画像URLをbase64 Data URLに変換
     const base64ImageUrl = await imageUrlToBase64(inputData.imageUrl);
-    console.log('[kakeibo-workflow] Step 2: Image converted, length:', base64ImageUrl.length);
 
     const prompt = `
 このレシート画像から以下の情報を抽出してJSON形式で返してください。
@@ -86,15 +80,8 @@ const extractReceiptInfo = createStep({
 不明な項目は省略または0にしてください。
 `;
 
-    console.log('[kakeibo-workflow] Step 3: Calling OpenAI API with timeout');
-    const startTime = Date.now();
-
-    // タイムアウト付きfetch
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => {
-      console.log('[kakeibo-workflow] !!! TIMEOUT: Aborting request after 60 seconds !!!');
-      controller.abort();
-    }, 60000); // 60秒でタイムアウト
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
 
     try {
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -109,15 +96,17 @@ const extractReceiptInfo = createStep({
             {
               role: 'user',
               content: [
-              {
-                type: 'text', text: prompt },
-              {
-                type: 'image_url',
-                image_url: { 
-                  url: base64ImageUrl,
-                  detail: 'low'
-                }
-              },
+                {
+                  type: 'text',
+                  text: prompt
+                },
+                {
+                  type: 'image_url',
+                  image_url: {
+                    url: base64ImageUrl,
+                    detail: 'low'
+                  }
+                },
               ],
             },
           ],
@@ -128,24 +117,16 @@ const extractReceiptInfo = createStep({
       });
 
       clearTimeout(timeoutId);
-      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      console.log(`[kakeibo-workflow] Step 4: API response received in ${elapsed}s, status:`, response.status);
 
       if (!response.ok) {
         const errorData = await response.json();
-        console.error('[kakeibo-workflow] OpenAI API error:', errorData);
         throw new Error(`OpenAI API error: ${JSON.stringify(errorData)}`);
       }
 
-      console.log('[kakeibo-workflow] Step 5: Parsing response JSON');
       const data = await response.json();
       const content = data.choices[0].message.content;
-      console.log('[kakeibo-workflow] Step 6: Response content length:', content.length);
-      
       const receiptData = JSON.parse(content);
 
-      console.log('[kakeibo-workflow] Step 7: Successfully extracted receipt data');
-      console.log('[kakeibo-workflow] ========== END EXTRACT ==========');
       return {
         storeName: receiptData.storeName || '不明',
         date: receiptData.date || new Date().toISOString(),
@@ -159,7 +140,6 @@ const extractReceiptInfo = createStep({
     } catch (fetchError) {
       clearTimeout(timeoutId);
       if (fetchError instanceof Error && fetchError.name === 'AbortError') {
-        console.error('[kakeibo-workflow] Request was aborted due to timeout');
         throw new Error('OpenAI APIリクエストがタイムアウトしました（60秒）。画像が大きすぎる可能性があります。');
       }
       throw fetchError;
