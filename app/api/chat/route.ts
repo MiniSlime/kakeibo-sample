@@ -1,17 +1,18 @@
 import { mastra } from "@/mastra";
-import { UIMessage } from "ai";
 import { setImageUrlForRun } from "@/mastra/tools/receipt-ocr-tool";
+import { streamText } from "ai";
+import { openai } from "@ai-sdk/openai";
 
 export const maxDuration = 300;
 
 export async function POST(req: Request) {
-  const { messages }: { messages: UIMessage[] } = await req.json();
+  const { messages } = await req.json();
 
   let extractedImageUrl: string | null = null;
 
   for (const msg of messages) {
     if (msg.role === 'user' && 'parts' in msg && Array.isArray(msg.parts)) {
-      const filePart = msg.parts.find((p) =>
+      const filePart = msg.parts.find((p: any) =>
         typeof p === 'object' && p !== null && 'type' in p && p.type === 'file'
       );
 
@@ -36,49 +37,45 @@ export async function POST(req: Request) {
     setImageUrlForRun(run.runId, extractedImageUrl);
   }
 
-  const result = await run.start({
+  const workflowResult = await run.start({
     inputData: {
       imageUrl: extractedImageUrl || '',
       category: '未分類',
     },
   });
 
-  console.log('[DEBUG] Workflow status:', result.status);
-  if (result.status === 'success') {
-    console.log('[DEBUG] Workflow result:', result.result);
-  } else if (result.status === 'failed') {
-    console.log('[DEBUG] Workflow error:', result.error);
+  console.log('[DEBUG] Workflow status:', workflowResult.status);
+  if (workflowResult.status === 'success') {
+    console.log('[DEBUG] Workflow result:', workflowResult.result);
+  } else if (workflowResult.status === 'failed') {
+    console.log('[DEBUG] Workflow error:', workflowResult.error);
   }
 
-  // ストリーミングレスポンスを作成
-  const encoder = new TextEncoder();
-  const stream = new ReadableStream({
-    start(controller) {
-      let message = '';
+  let responseMessage = '';
+  if (workflowResult.status === 'success') {
+    responseMessage = workflowResult.result.message || '処理が完了しました';
+  } else if (workflowResult.status === 'failed') {
+    responseMessage = `エラーが発生しました: ${workflowResult.error || '不明なエラー'}`;
+  } else {
+    responseMessage = 'ワークフローが一時停止しています';
+  }
 
-      if (result.status === 'success') {
-        console.log('[DEBUG] Success result:', result.result);
-        message = result.result.message || '処理が完了しました';
-      } else if (result.status === 'failed') {
-        console.error('[ERROR] Workflow failed:', result.error);
-        message = `エラーが発生しました: ${result.error || '不明なエラー'}`;
-      } else {
-        console.log('[DEBUG] Workflow suspended');
-        message = 'ワークフローが一時停止しています';
-      }
+  console.log('[DEBUG] Final message:', responseMessage);
 
-      // テキストチャンクとして送信
-      const textChunk = `0:"${message.replace(/"/g, '\\"')}"\n`;
-      controller.enqueue(encoder.encode(textChunk));
-
-      controller.close();
-    },
+  // AI SDKのstreamTextを使ってassistant-ui互換のレスポンスを返す
+  const result = streamText({
+    model: openai("gpt-4o"),
+    messages: [
+      {
+        role: "system",
+        content: "ユーザーに以下のメッセージを伝えてください。そのまま返答してください。",
+      },
+      {
+        role: "user",
+        content: responseMessage,
+      },
+    ],
   });
 
-  return new Response(stream, {
-    headers: {
-      'Content-Type': 'text/plain; charset=utf-8',
-      'X-Vercel-AI-Data-Stream': 'v1',
-    },
-  });
+  return result.toUIMessageStreamResponse();
 }
