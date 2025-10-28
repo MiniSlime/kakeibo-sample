@@ -160,18 +160,44 @@ export const receiptOcrTool = createTool({
   execute: async (params) => {
     const { context } = params;
     let imageUrl = context.imageUrl;
+
+    const imageUrlPreview = imageUrl 
+      ? (imageUrl.startsWith('data:') ? `data URL (${imageUrl.length} chars)` : imageUrl)
+      : 'null';
     
+    console.log('[DEBUG] Receipt OCR Tool - Input imageUrl:', imageUrlPreview);
+
     if (!imageUrl || imageUrl === '') {
       const runId = (params as unknown as { runId?: string }).runId;
+      console.log('[DEBUG] Receipt OCR Tool - RunID:', runId);
+      
       if (runId) {
         const storedUrl = imageUrlStorage.get(runId);
+        const storedUrlPreview = storedUrl
+          ? (storedUrl.startsWith('data:') ? `data URL (${storedUrl.length} chars)` : storedUrl)
+          : 'null';
+        console.log('[DEBUG] Receipt OCR Tool - Stored URL:', storedUrlPreview);
+        
         if (storedUrl) {
           imageUrl = storedUrl;
           clearImageUrlForRun(runId);
         }
       }
     }
+
+    const finalUrlPreview = imageUrl
+      ? (imageUrl.startsWith('data:') ? `data URL (${imageUrl.length} chars)` : imageUrl)
+      : 'null';
+    console.log('[DEBUG] Receipt OCR Tool - Final imageUrl:', finalUrlPreview);
+
+    if (!imageUrl) {
+      throw new Error('画像URLが指定されていません');
+    }
+
+    const result = await analyzeReceipt(imageUrl);
+    console.log('[DEBUG] Receipt OCR Tool - Result items count:', result.items?.length || 0);
+    console.log('[DEBUG] Receipt OCR Tool - Result total:', result.total);
     
-    return await analyzeReceipt(imageUrl);
+    return result;
   },
 });

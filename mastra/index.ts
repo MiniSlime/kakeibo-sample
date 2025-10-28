@@ -3,11 +3,12 @@ import { Mastra } from '@mastra/core/mastra';
 import { PinoLogger } from '@mastra/loggers';
 import { kakeiboWorkflow } from './workflows/kakeibo-workflow';
 import { kakeiboAgent } from './agents/kakeibo-agent';
-
+import { receiptOcrAgent } from './agents/receipt-ocr-agent';
+import { csvWriterAgent } from './agents/csv-writer-agent';
 
 export const mastra = new Mastra({
   workflows: { kakeiboWorkflow },
-  agents: { kakeiboAgent },
+  agents: { kakeiboAgent, receiptOcrAgent, csvWriterAgent },
   logger: new PinoLogger({
     name: 'Mastra',
     level: 'debug', // infoからdebugに変更してより詳細なログを出力
